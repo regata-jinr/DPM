@@ -1,20 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel;
-using System.Data;
 using System.Drawing;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using System.Windows.Forms;
-using System.IO.Ports;
-using OwenioNet;
-using OwenioNet.IO;
-using OwenioNet.Exceptions;
-using OwenioNet.Types;
-using OwenioNet.DataConverter.Converter;
-using OwenioNet.DataConverter.Types;
-using System.Threading;
 
 namespace DetectorsPowerManagement
 {
@@ -29,10 +17,8 @@ namespace DetectorsPowerManagement
         private Label label = new Label();
         private TextBox textBox = new TextBox();
         private Button button = new Button();
-        IOwenProtocolMaster owenProtocol;
-        private string parametername = "r.OE";
         private int portNumber = 8;
-
+        private MU110_32R mu110 = new MU110_32R();
         public Form1()
         {
             InitializeComponent();
@@ -49,7 +35,7 @@ namespace DetectorsPowerManagement
             SuspendLayout();
             //Button
             button.Location = new Point(170, 10);
-            button.Text = "Set";
+            button.Text = "Open/Close port";
             button.AutoSize = true;
             button.Name = "button";
             button.Click += (sender, args) => SetPortNumber();
@@ -66,7 +52,7 @@ namespace DetectorsPowerManagement
             // 
             // groupBoxList
             // 
-            var names = new[] { "D1", "D5", "D7", "D8" };
+            var names = new[] { "SampleChanger on D1", "SampleChanger on D5", "SampleChanger on D7", "SampleChanger on D8" };
             var YShift = 70;
             for (int i = 0; i < 4; i++)
             {
@@ -113,6 +99,8 @@ namespace DetectorsPowerManagement
                 //Graphics
                 gr.Add(Graphics.FromImage(pictureBoxList[i].BackgroundImage));
                 gr[i].FillEllipse(new SolidBrush(Color.Red), 0, 0, pictureBoxList[i].Size.Width, pictureBoxList[i].Size.Height);
+
+                groupBoxList[i].Enabled = false;
             }
             // 
             // Form1
@@ -131,68 +119,75 @@ namespace DetectorsPowerManagement
                 ((ISupportInitialize)(pictureBoxList[i])).EndInit();
             }
             Name = "Form1";
-            Text = "DetectorsPowerManagement";
+            Text = "Power management";
             ResumeLayout(false);
             
         }
 
         private void On(int i, bool on)
         {
-            SolidBrush brush;
-            byte[] turnOn;
-            if (on)
-            {
-                brush = new SolidBrush(Color.GreenYellow);
-                turnOn = new ConverterFloat(3).Convert(1);
-            }
-            else
-            {
-                turnOn = new ConverterFloat(3).Convert(0);
-                brush = new SolidBrush(Color.Red);
-            }
-            gr[i].FillEllipse(brush, 0, 0, pictureBoxList[i].Size.Width, pictureBoxList[i].Size.Height);
-            pictureBoxList[i].Refresh();
+            SolidBrush brush = new SolidBrush(Color.GreenYellow);
             try
             {
-                owenProtocol.OwenWrite(28 + i, AddressLengthType.Bits8, parametername, turnOn);
+                if (on)
+                    mu110.TurnOnSingleOutput(12 + i, true);
+                else
+                {
+                    brush = new SolidBrush(Color.Red);
+                    mu110.TurnOnSingleOutput(12 + i, false);
+                }
+                gr[i].FillEllipse(brush, 0, 0, pictureBoxList[i].Size.Width, pictureBoxList[i].Size.Height);
+                pictureBoxList[i].Refresh();
             }
             catch
             {
-                MessageBox.Show(string.Format("Не могу получить доступ к выходу № {0}.", (13+i).ToString()));
+                MessageBox.Show($"Program cannot get access to output № {13+i}.");
             }
         }
 
         private void SetPortNumber()
         {
-            string text = null;
-            try
+            SolidBrush brush = new SolidBrush(Color.GreenYellow);
+            var gbCount = groupBoxList.Count;
+            if (textBox.BackColor == Color.GreenYellow)
             {
-                text = textBox.Text.ToString();
-                portNumber = Int32.Parse(text);
-                if (portNumber < 0 || portNumber > 1000)
+                try
                 {
-                    MessageBox.Show(string.Format("Введите число от 0 до 1000, вместо {0}.", text));
+                    mu110.ClosePort();
+                    textBox.BackColor = Color.White;
+                    for (int i = 0; i < gbCount; ++i) groupBoxList[i].Enabled = false;
+                }
+                catch
+                {
+                    MessageBox.Show($"Program cannot close the port. {mu110.ToString()}.");
+                }
+            }
+            else
+            {
+                string text = null;
+                try
+                {
+                    text = textBox.Text.ToString();
+                    portNumber = Int32.Parse(text);
+                    mu110.OpenPort(portNumber);
+                    textBox.BackColor = Color.GreenYellow;
+                    for (int i = 0; i < gbCount; ++i)
+                    {
+                        groupBoxList[i].Enabled = true;
+                        if (mu110.GetCurrentStateOfSingleOutput(12 + i))
+                        {
+                            gr[i].FillEllipse(brush, 0, 0, pictureBoxList[i].Size.Width, pictureBoxList[i].Size.Height);
+                            pictureBoxList[i].Refresh();
+                        }
+                    }
+                }
+                catch
+                {
+                    MessageBox.Show($"Program cannot open the port {portNumber}.");
                     textBox.Focus();
                     return;
                 }
             }
-            catch
-            {
-                MessageBox.Show(string.Format("Введите число больше от 0 до 1000, вместо {0}.", text));
-                textBox.Focus();
-                return;
-            }
-            SerialPortAdapter port = new SerialPortAdapter(portNumber, 9600, Parity.None, 8, StopBits.One);
-            try
-            {
-                port.Open();
-            }
-            catch
-            {
-                MessageBox.Show(string.Format("Ошибка открытия порта COM{1}: {0}", port.ToString(), portNumber));
-                return;
-            }
-            owenProtocol = OwenProtocolMaster.Create(port);
         }
     }
 }

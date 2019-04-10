@@ -6,6 +6,7 @@ using OwenioNet.IO;
 using OwenioNet.Types;
 using OwenioNet.DataConverter.Converter;
 using System.Threading;
+using System.Linq;
 
 namespace DetectorsPowerManagement
 {
@@ -14,34 +15,21 @@ namespace DetectorsPowerManagement
     /// </summary>
     class MU110_32R
     {
-        public IOwenProtocolMaster OwenProtocol { get; private set; }
-
-        // channelCount я бы тоже заменил без геттеров и сеттров здесь на простую константу
-        // если проверок не делаешь - смысла в геттерах и сеттерах нету
-        //   private int ChannelCount { get; set; }
-
-        // тут надо получше разобраться в разнице между static readonly и const 
-        // https://stackoverflow.com/questions/7751680/public-const-string
-        public const int channelCount = 32;
-        private static readonly byte[] turnOn = { 0x20 };
-        private static readonly byte[] turnOff = { 0x20 };
-
-        private void Initialize()
-        {
-            // your initialisations
-        }
-
-        public MU110_32R() { Initialize(); }
+        private IOwenProtocolMaster OwenProtocol { get; set; }
+        private const int channelCount = 32;
+        private readonly byte[] turnOn = new ConverterFloat(3).Convert(1);
+        private readonly byte[] turnOff = new ConverterFloat(3).Convert(0);
 
         public MU110_32R(int port)
         {
-            Initialize();
             OpenPort(port);
         }
 
-        private int portNumber;
+        public MU110_32R()
+        {
+        }
 
-        // здесь надо проверить возможно в SerialPortAdapter уже есть проверки. попробуй передать туда 1, 0, string, null
+        private int portNumber;
         private int PortNumber
         {
             get { return portNumber; }
@@ -52,7 +40,7 @@ namespace DetectorsPowerManagement
                     if (value < 0) throw new ArgumentException("PortNumber must be integer and greater than zero.");
                     portNumber = value;
                 }
-                catch { throw new ArgumentException("PortNumber must be integer and greater than zero."); }
+                catch { throw new ArgumentException($"Value = {value}. PortNumber must be integer and greater than zero."); }
             }
         }
 
@@ -73,6 +61,15 @@ namespace DetectorsPowerManagement
             catch { throw new Exception($"Cannot open port {PortNumber}"); }
         }
 
+        public void ClosePort()
+        {
+            try
+            {
+                OwenProtocol.CloseSerialPort();
+            }
+            catch { throw new Exception($"Cannot close port."); }
+        }
+
         // i = 1...32
         /// <summary>
         /// Turns the on single output.
@@ -82,12 +79,9 @@ namespace DetectorsPowerManagement
         /// <exception cref="Exception">Program cannot access to the output № {15 + i}</exception>
         public void TurnOnSingleOutput(int i, bool on)
         {
-            byte[] turnOn = new ConverterFloat(3).Convert(on ? 1 : 0);
-            try
-            {
-                OwenProtocol.OwenWrite(15 + i, AddressLengthType.Bits8, "r.OE", turnOn);
-            }
-            catch { throw new Exception($"Program cannot access to the output № {15 + i}"); }
+            var onOrOff = (on ? turnOn : turnOff);
+            try { OwenProtocol.OwenWrite(16 + i, AddressLengthType.Bits8, "r.OE", onOrOff); }
+            catch { throw new Exception($"Program cannot access to the output № {16 + i}"); }
         }
 
         /// <summary>
@@ -95,20 +89,20 @@ namespace DetectorsPowerManagement
         /// </summary>
         /// <param name="outputNumber">The output number.</param>
         /// <returns></returns>
-        public byte[] GetCurrentStateOfSingleOutput(int outputNumber)
+        public bool GetCurrentStateOfSingleOutput(int outputNumber)
         {
-            return OwenProtocol.OwenRead(15 + outputNumber, AddressLengthType.Bits8, "r.OE");
+            return Enumerable.SequenceEqual(turnOn, OwenProtocol.OwenRead(16 + outputNumber, AddressLengthType.Bits8, "r.OE")) ? true : false;
         }
 
         /// <summary>
         /// Gets the state of the current.
         /// </summary>
         /// <returns></returns>
-        public List<byte[]> GetCurrentState()
+        public List<bool> GetCurrentState()
         {
-            var result = new List<byte[]>();
+            var result = new List<bool>();
             for (var i = 0; i < channelCount; ++i)
-                result.Add(OwenProtocol.OwenRead(16 + i, AddressLengthType.Bits8, "r.OE"));
+                result.Add(Enumerable.SequenceEqual(turnOn, OwenProtocol.OwenRead(16 + i, AddressLengthType.Bits8, "r.OE")) ? true : false);
             return result;
         }
 
@@ -125,7 +119,7 @@ namespace DetectorsPowerManagement
                 for (; i < channelCount; ++i)
                     OwenProtocol.OwenWrite(16 + i, AddressLengthType.Bits8, "r.OE", status);
             }
-            catch { throw new Exception($"Program cannot turn off output № {16 + i}"); }
+            catch { throw new Exception($"Program cannot get acsess to output № {16 + i}"); }
         }
 
         public void TurnOffAll() { TurnAll(turnOff); }
@@ -148,7 +142,7 @@ namespace DetectorsPowerManagement
                     OwenProtocol.OwenWrite(16 + i, AddressLengthType.Bits8, "r.OE", turnOff);
                 }
             }
-            catch { throw new Exception($"Program cannot access to the output № {16 + i}"); }
+            catch { throw new Exception($"Program cannot get access to the output № {16 + i}"); }
         }
     }
 }
